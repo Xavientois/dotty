@@ -3,11 +3,17 @@ package dotc
 package transform
 package init
 
-import ast.tpd._
-
-import core._
-import Decorators._, printing.SyntaxHighlighting
-import Types._, Symbols._, Contexts._
+import java.lang.System.lineSeparator as EOL
+import ast.tpd.*
+import core.*
+import Decorators.*
+import printing.SyntaxHighlighting
+import Types.*
+import Symbols.*
+import Contexts.*
+import dotty.tools.dotc.reporting.Box
+import dotty.tools.dotc.reporting.Highlight.Level
+import dotty.tools.dotc.reporting.Offsets.Offset
 
 object Errors {
   type Errors = Seq[Error]
@@ -26,10 +32,20 @@ object Errors {
 
     def toErrors: Errors = this :: Nil
 
-    def stacktrace(using Context): String = if (trace.isEmpty) "" else " Calling trace:\n" + {
+    def stacktrace(using ctx: Context): String = if (trace.isEmpty) "" else {
       var indentCount = 0
       var last: String = ""
+      val posStack = trace.map(tree => (tree.sourcePos, tree.show))
+
       val sb = new StringBuilder
+      val maxLineNumber = trace.map(_.sourcePos.endLine).max + 1
+      {
+        given Level = Level(2)
+        given Offset = Offset(maxLineNumber.toString.length + 2)
+        sb.append(EOL).append(Box.newBox())
+        sb.append(EOL).append(Box.offsetBox).append(i"Calling trace")
+        sb.append(EOL).append(Box.newBox(soft = true))
+      }
       trace.foreach { tree =>
         indentCount += 1
         val pos = tree.sourcePos

@@ -2,17 +2,18 @@ package dotty.tools
 package dotc
 package reporting
 
-import java.lang.System.{lineSeparator => EOL}
-
-import core.Contexts._
-import core.Decorators._
+import java.lang.System.lineSeparator as EOL
+import core.Contexts.*
+import core.Decorators.*
 import printing.Highlighting.{Blue, Red, Yellow}
 import printing.SyntaxHighlighting
-import Diagnostic._
-import util.{ SourcePosition, NoSourcePosition }
-import util.Chars.{ LF, CR, FF, SU }
-import scala.annotation.switch
+import Diagnostic.*
+import dotty.tools.dotc.reporting.Highlight.Level
+import dotty.tools.dotc.reporting.Offsets.{Offset, offset}
+import util.{NoSourcePosition, SourcePosition}
+import util.Chars.{CR, FF, LF, SU}
 
+import scala.annotation.switch
 import scala.collection.mutable
 
 trait MessageRendering {
@@ -45,7 +46,7 @@ trait MessageRendering {
       val lineNbr = (pos.source.offsetToLine(offset1) + 1).toString
       val prefix = String.format(s"%${offset - 2}s |", lineNbr)
       maxLen = math.max(maxLen, prefix.length)
-      val lnum = hl(" " * math.max(0, maxLen - prefix.length - 1) + prefix)
+      val lnum = Box.hl(" " * math.max(0, maxLen - prefix.length - 1) + prefix)
       lnum + line.stripLineEnd
     }
 
@@ -73,71 +74,6 @@ trait MessageRendering {
     )
   }
 
-  /** Generate box containing the report title
-   *
-   *  ```
-   *  -- Error: source.scala ---------------------
-   *  ```
-   */
-  private def boxTitle(title: String)(using Context, Level, Offset): String =
-    val pageWidth = ctx.settings.pageWidth.value
-    val line = "-" * (pageWidth - title.length - 4)
-    hl(s"-- $title $line")
-
-  /** The position markers aligned under the error
-   *
-   *  ```
-   *    |         ^^^^^
-   *  ```
-   */
-  private def positionMarker(pos: SourcePosition)(using Context, Level, Offset): String = {
-    val padding = pos.startColumnPadding
-    val carets =
-      if (pos.startLine == pos.endLine)
-        "^" * math.max(1, pos.endColumn - pos.startColumn)
-      else "^"
-    hl(s"$offsetBox$padding$carets")
-  }
-
-  /** The horizontal line with the given offset
-   *
-   *  ```
-   *    |
-   *  ```
-   */
-  private def offsetBox(using Context, Level, Offset): String =
-    val prefix = " " * (offset - 1)
-    hl(s"$prefix|")
-
-  /** The end of a box section
-   *
-   *  ```
-   *    |---------------
-   *  ```
-   *  Or if there `soft` is true,
-   *  ```
-   *    |- - - - - - - -
-   *  ```
-   */
-  private def newBox(soft: Boolean = false)(using Context, Level, Offset): String =
-    val pageWidth = ctx.settings.pageWidth.value
-    val prefix = " " * (offset - 1)
-    val lineWidth = (pageWidth - offset)
-    val line = if soft then ("- " * ((lineWidth + 1) / 2)).trim else "-" * lineWidth
-    hl(s"$prefix|$line")
-
-  /** The end of a box section
-   *
-   *  ```
-   *     ----------------
-   *  ```
-   */
-  private def endBox(using Context, Level, Offset): String =
-    val pageWidth = ctx.settings.pageWidth.value
-    val prefix = " " * (offset - 1)
-    val line = "-" * (pageWidth - offset)
-    hl(s"${prefix} $line")
-
   /** The error message (`msg`) aligned under `pos`
     *
     * @return aligned error message
@@ -152,7 +88,7 @@ trait MessageRendering {
     }
 
     msg.linesIterator
-      .map { line => offsetBox + (if line.isEmpty then "" else padding + line) }
+      .map { line => Box.offsetBox+ (if line.isEmpty then "" else padding + line) }
       .mkString(EOL)
   }
 
@@ -166,7 +102,7 @@ trait MessageRendering {
     * @return separator containing error location and kind
     */
   private def posStr(pos: SourcePosition, message: Message, diagnosticString: String)(using Context, Level, Offset): String =
-    if (pos.source != NoSourcePosition.source) hl({
+    if (pos.source != NoSourcePosition.source) Box.hl({
       val realPos = pos.nonInlined
       val fileAndPos = posFileStr(realPos)
       val errId =
@@ -180,7 +116,7 @@ trait MessageRendering {
       val title =
         if fileAndPos.isEmpty then s"$errId$kind:" // this happens in dotty.tools.repl.ScriptedTests // TODO add name of source or remove `:` (and update test files)
         else s"$errId$kind: $fileAndPos"
-      boxTitle(title)
+      Box.title(title)
     }) else ""
 
   /** Explanation rendered under "Explanation" header */
@@ -229,21 +165,21 @@ trait MessageRendering {
       val pos1 = pos.nonInlined
       if (pos1.exists && pos1.source.file.exists) {
         val (srcBefore, srcAfter, offset) = sourceLines(pos1)
-        val marker = positionMarker(pos1)
+        val marker = Box.positionMarker(pos1)
         val err = errorMsg(pos1, msg.message)
         sb.append((srcBefore ::: marker :: err :: srcAfter).mkString(EOL))
 
         if inlineStack.nonEmpty then
-          sb.append(EOL).append(newBox())
-          sb.append(EOL).append(offsetBox).append(i"Inline stack trace")
+          sb.append(EOL).append(Box.newBox())
+          sb.append(EOL).append(Box.offsetBox).append(i"Inline stack trace")
           for inlinedPos <- inlineStack if inlinedPos != pos1 do
-            sb.append(EOL).append(newBox(soft = true))
-            sb.append(EOL).append(offsetBox).append(i"This location contains code that was inlined from $pos")
+            sb.append(EOL).append(Box.newBox(soft = true))
+            sb.append(EOL).append(Box.offsetBox).append(i"This location contains code that was inlined from $pos")
             if inlinedPos.source.file.exists then
               val (srcBefore, srcAfter, _) = sourceLines(inlinedPos)
-              val marker = positionMarker(inlinedPos)
+              val marker = Box.positionMarker(inlinedPos)
               sb.append(EOL).append((srcBefore ::: marker :: srcAfter).mkString(EOL))
-          sb.append(EOL).append(endBox)
+          sb.append(EOL).append(Box.end)
       }
       else sb.append(msg.message)
     }
@@ -252,25 +188,19 @@ trait MessageRendering {
       appendFilterHelp(dia, sb)
 
     if Diagnostic.shouldExplain(dia) then
-      sb.append(EOL).append(newBox())
-      sb.append(EOL).append(offsetBox).append(" Explanation (enabled by `-explain`)")
-      sb.append(EOL).append(newBox(soft = true))
+      sb.append(EOL).append(Box.newBox())
+      sb.append(EOL).append(Box.offsetBox).append(" Explanation (enabled by `-explain`)")
+      sb.append(EOL).append(Box.newBox(soft = true))
       dia.msg.explanation.split(raw"\R").foreach { line =>
-        sb.append(EOL).append(offsetBox).append(if line.isEmpty then "" else " ").append(line)
+        sb.append(EOL).append(Box.offsetBox).append(if line.isEmpty then "" else " ").append(line)
       }
-      sb.append(EOL).append(endBox)
+      sb.append(EOL).append(Box.end)
     else if dia.msg.canExplain then
-      sb.append(EOL).append(offsetBox)
-      sb.append(EOL).append(offsetBox).append(" longer explanation available when compiling with `-explain`")
+      sb.append(EOL).append(Box.offsetBox)
+      sb.append(EOL).append(Box.offsetBox).append(" longer explanation available when compiling with `-explain`")
 
     sb.toString
   }
-
-  private  def hl(str: String)(using Context, Level): String =
-    summon[Level].value match
-      case interfaces.Diagnostic.ERROR   => Red(str).show
-      case interfaces.Diagnostic.WARNING => Yellow(str).show
-      case interfaces.Diagnostic.INFO    => Blue(str).show
 
   private def diagnosticLevel(dia: Diagnostic): String =
     dia match {
@@ -286,7 +216,98 @@ trait MessageRendering {
 
 }
 
-private object Highlight {
+/** Helper methods used to render error messages in boxes
+ *
+ * ```
+ * -- Error: source.scala:6:5 --------------------
+6 |     v2  // error
+  |     ^^
+  |     Error
+  |-----------------------------------------------
+  |Inline stack trace
+  |···············································
+  |This location contains code that was inlined from source.scala:3
+3 |     inline def v2 = InlineMac.sample("foo")
+  |                                      ^^^^^
+  ·-----------------------------------------------
+ * ```
+ */
+object Box {
+
+  /** Generate box containing the report title
+   *
+   *  ```
+   *  -- Error: source.scala ---------------------
+   *  ```
+   */
+  def title(title: String)(using Context, Level, Offset): String =
+    val pageWidth = ctx.settings.pageWidth.value
+    val line = "-" * (pageWidth - title.length - 4)
+    hl(s"-- $title $line")
+
+  /** The position markers aligned under the error
+   *
+   *  ```
+   *    |         ^^^^^
+   *  ```
+   */
+  def positionMarker(pos: SourcePosition)(using Context, Level, Offset): String = {
+    val padding = pos.startColumnPadding
+    val carets =
+      if (pos.startLine == pos.endLine)
+        "^" * math.max(1, pos.endColumn - pos.startColumn)
+      else "^"
+    hl(s"$offsetBox$padding$carets")
+  }
+
+  /** The horizontal line with the given offset
+   *
+   *  ```
+   *    |
+   *  ```
+   */
+  def offsetBox(using Context, Level, Offset): String =
+    val prefix = " " * (offset - 1)
+    hl(s"$prefix|")
+
+  /** The end of a box section
+   *
+   *  ```
+   *    |---------------
+   *  ```
+   *  Or if there `soft` is true,
+   *  ```
+   *    |- - - - - - - -
+   *  ```
+   */
+  def newBox(soft: Boolean = false)(using Context, Level, Offset): String =
+    val pageWidth = ctx.settings.pageWidth.value
+    val prefix = " " * (offset - 1)
+    val lineWidth = (pageWidth - offset)
+    val line = if soft then ("- " * ((lineWidth + 1) / 2)).trim else "-" * lineWidth
+    hl(s"$prefix|$line")
+
+  /** The end of a box section
+   *
+   *  ```
+   *     ----------------
+   *  ```
+   */
+  def end(using Context, Level, Offset): String =
+    val pageWidth = ctx.settings.pageWidth.value
+    val prefix = " " * (offset - 1)
+    val line = "-" * (pageWidth - offset)
+    hl(s"${prefix} $line")
+
+  def hl(str: String)(using Context, Level): String =
+    summon[Level].value match
+      case interfaces.Diagnostic.ERROR   => Red(str).show
+      case interfaces.Diagnostic.WARNING => Yellow(str).show
+      case interfaces.Diagnostic.INFO    => Blue(str).show
+
+}
+
+object Highlight {
   opaque type Level = Int
   extension (level: Level) def value: Int = level
   object Level:
@@ -302,7 +323,7 @@ private object Highlight {
  *  ^^^ // size of this offset
  *  ```
  */
-private object Offsets {
+object Offsets {
   opaque type Offset = Int
   def offset(using o: Offset): Int = o
   object Offset:
