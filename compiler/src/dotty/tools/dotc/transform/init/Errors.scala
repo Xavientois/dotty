@@ -39,17 +39,13 @@ object Errors {
 
       val sb = new StringBuilder
       val maxLineNumber = trace.map(_.sourcePos.endLine).max + 1
-      {
-        given Level = Level(2)
-        given Offset = Offset(maxLineNumber.toString.length + 2)
-        sb.append(EOL).append(Box.newBox())
-        sb.append(EOL).append(Box.offsetBox).append(i"Calling trace")
-        sb.append(EOL).append(Box.newBox(soft = true))
-      }
+      given Level = Level(2)
+      given Offset = Offset(maxLineNumber.toString.length + 2)
+      sb.append(EOL).append(Box.newBox()(using ctx))
+      sb.append(EOL).append(Box.offsetBox(using ctx)).append(i"Calling trace:")
       trace.foreach { tree =>
         indentCount += 1
         val pos = tree.sourcePos
-        val prefix = s"${ " " * indentCount }-> "
         val line =
           if pos.source.exists then
             val loc = "[ " + pos.source.file.name + ":" + (pos.line + 1) + " ]"
@@ -58,10 +54,14 @@ object Errors {
           else
             tree.show
 
-        if (last != line)  sb.append(prefix + line + "\n")
+        if (last != line) {
+          sb.append(EOL).append(Box.newBox(soft = true)(using ctx))
+          sb.append(EOL).append(Box.offsetBox(using ctx)).append(line)
+        }
 
         last = line
       }
+      sb.append(EOL).append(Box.end)
       sb.toString
     }
 
